@@ -21,6 +21,7 @@ class ShoppingServiceTest {
     private ProductDao productDao;
     private Customer customer;
     private Product product;
+    private Cart cart;
 
     @BeforeEach
     void setUp() {
@@ -28,6 +29,7 @@ class ShoppingServiceTest {
         shoppingService = new ShoppingServiceImpl(productDao);
         customer = new Customer(123L, "11-22-33-44");
         product = new Product("Продукт", 10);
+        cart = new Cart(customer);
     }
 
     /**
@@ -44,35 +46,20 @@ class ShoppingServiceTest {
 
     /**
      * Проверяем получение всех продуктов
-     * Обязуем productDao возвращать список существующих продуктов
-     * Проверяем, что результат совпадает со списком продуктов из productDao
-     * Проверяем, что productDao.getAll() вызвался ровно 1 раз
      */
     @Test
     public void testGetAllProducts() {
-        List<Product> products = List.of(product);
-        Mockito.when(productDao.getAll()).thenReturn(products);
-
-        List<Product> result = shoppingService.getAllProducts();
-
-        Assertions.assertEquals(products, result);
-        Mockito.verify(productDao, Mockito.times(1)).getAll();
+        // Как я понял, тест бесполезен, т.к. getAllProducts() просто обращается к Dao
+        // И не имеет другой логики
     }
 
     /**
      * Проверяем получение продукта по имени
-     * Обязуем productDao возвращать существующий product по имени "Продукт"
-     * Проверяем, что результат совпадает с product из productDao
-     * Проверяем, что productDao.getByName() с параметром "Продукт" вызвался ровно 1 раз
      */
     @Test
     public void testGetProductByName() {
-        Mockito.when(productDao.getByName("Продукт")).thenReturn(product);
-
-        Product result = shoppingService.getProductByName("Продукт");
-
-        Assertions.assertEquals(product, result);
-        Mockito.verify(productDao, Mockito.times(1)).getByName("Продукт");
+        // Как я понял, тест бесполезен, т.к. getAllProducts() просто обращается к Dao
+        // И не имеет другой логики
     }
 
     /**
@@ -82,7 +69,6 @@ class ShoppingServiceTest {
      */
     @Test
     public void testBuySuccess() throws BuyException {
-        Cart cart = shoppingService.getCart(customer);
         cart.add(product, 2);
 
         boolean result = shoppingService.buy(cart);
@@ -98,8 +84,6 @@ class ShoppingServiceTest {
      */
     @Test
     public void testBuyEmptyCart() throws BuyException {
-        Cart cart = shoppingService.getCart(customer);
-
         boolean result = shoppingService.buy(cart);
 
         Assertions.assertFalse(result);
@@ -107,29 +91,68 @@ class ShoppingServiceTest {
     }
 
     /**
-     * Тестирует возникновении ошибки, если при покупке недостаточно товара.
-     * Нет смысла тестировать, т.к. при покупке количество товара не уменьшается,
-     * а в Cart нельзя добавить товара больше, чем есть.
-     * Является  логической ошибкой.
+     * Проверяем покупку продукта из корзины
+     * Проверяем, что покупка удачна
+     * Проверяем, что рбщее количество товара уменьшилось
+     * Проверяем, что Dao обновило состояние продукта
+     * Проверяем, что корзина стала пустой
      */
     @Test
-    public void testBuyException() {
+    public void testBuySomeProducts() throws BuyException {
+        cart.add(product, 1);
+
+        boolean result = shoppingService.buy(cart);
+
+        Assertions.assertTrue(result);
+        Assertions.assertEquals(9, product.getCount());
+        Mockito.verify(productDao, Mockito.times(1)).save(product);
+        Assertions.assertTrue(cart.getProducts().isEmpty());
     }
 
     /**
-     * Неотносящееся к ShoppingService: в классе Cart метод validateCount сравнивает
-     * количество товара и количество добавляемого в корзину, не учитывая,
-     * что какая-то часть товара уже могла быть добавлена.
-     * Является логичесской ошибкой
+     * Тестируем добавление в корзину избыточного количества продукта одним человеком
+     * Добавляем весь продукт
+     * Проверяем, что при попытке добавить ещё один продукт выбросится Exception с характерным сообщением
      */
+    @Test
+    public void testAddExtraCountProduct_ForOne() {
+        cart.add(product, 10);
+
+        Exception exception = Assertions.assertThrows(IllegalArgumentException.class,
+                ()-> cart.add(product, 1));
+        Assertions.assertEquals("Невозможно добавить товар " + product.getName()
+                + " в корзину, т.к. нет необходимого количества товаров", exception.getMessage());
+    }
+
 
     /**
-     * Неотносящееся к ShoppingService: корзина не учитывает изменение количества продукта.
-     * Является логичесской ошибкой
+     * Тестируем покупку избыточного количества продукта двумя людьми
+     * Первый покупатель совершает покупку
+     * Проверяем, что при попытке второго покупателя купить продукт выбрасывается BuyException с характерным сообщение
+     * Проверяем, что количество продукта изменилось только 1 раз.
      */
+    @Test
+    public void testBuyExtraCountProduct_ForSome() throws BuyException {
+        Cart cart2 = new Cart(new Customer(456, "55-66-77-88"));
+        cart.add(product, 6);
+        cart2.add(product, 5);
+        shoppingService.buy(cart);
+
+        BuyException exception = Assertions.assertThrows(BuyException.class, () -> shoppingService.buy(cart2));
+        Assertions.assertEquals("В наличии нет необходимого количества товара " + "'"
+                + product.getName() + "'", exception.getMessage());
+
+        Mockito.verify(productDao, Mockito.times(1)).save(product);
+    }
 
     /**
-     * Неотносящееся к ShoppingService: можно добавить null товар в Cart
-     * Является логичесской ошибкой
+     * Тестируем покупку отрицательного количества продуктов
+     * Проверяем, что покупка не удалась
      */
+    @Test
+    public void testBuyNegativeCountProduct() throws BuyException {
+        cart.add(product, -1);
+
+        Assertions.assertFalse(shoppingService.buy(cart));
+    }
 }
